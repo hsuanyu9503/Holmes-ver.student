@@ -1,20 +1,18 @@
 {
   "name": "606-intelligence-classroom",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "606 情報局｜近距課堂：教師控制平板、教室大螢幕、學生平板三端即時同步的課堂桌遊網站",
-  "main": "server/index.js",
+  "description": "606 情報局｜近距課堂：Supabase 後端 + 靜態網頁（教師控制平板、教室大螢幕、學生平板）",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js",
-    "test": "node --test tests/*.test.js",
+    "serve": "node tools/serve.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "test:e2e": "node tests/e2e/classroom.e2e.mjs"
   },
-  "dependencies": {
-    "qrcode": "1.5.4"
+  "devDependencies": {
+    "pg": "8.16.3"
   }
 }

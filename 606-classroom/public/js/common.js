@@ -27,62 +27,151 @@ function append(node, children) {
 export const pad2 = (n) => String(n).padStart(2, '0');
 export const roomFromUrl = () => (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-export async function api(path, body) {
-  const res = await fetch(path, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let data = {};
-  try { data = await res.json(); } catch {}
-  if (!res.ok) throw Object.assign(new Error(data.error || '連線失敗，請稍後再試'), { status: res.status });
-  return data;
+// ─────────────── Supabase 連線 ───────────────
+const CFG = window.INTEL606_CONFIG || {};
+let client = null;
+export const configured = () => !!(CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase);
+function sb() {
+  if (!client) {
+    if (!configured()) throw Object.assign(new Error('網站尚未設定 Supabase 連線（config.js）'), { status: 0 });
+    client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+  }
+  return client;
+}
+
+/** 呼叫資料庫函式。錯誤碼 PT401／PT403／PT404／PT409 轉為 status。 */
+export async function rpc(fn, args = {}) {
+  let res;
+  try {
+    res = await sb().rpc(fn, args);
+  } catch (err) {
+    throw Object.assign(new Error('連線失敗，請檢查網路後再試'), { status: 0, cause: err });
+  }
+  if (res.error) {
+    const m = /^PT(\d{3})$/.exec(res.error.code || '');
+    const status = m ? Number(m[1]) : res.error.code ? 400 : 0;
+    throw Object.assign(new Error(status ? res.error.message : '連線失敗，請檢查網路後再試'), { status });
+  }
+  return res.data;
+}
+
+/** 網站對外網址（QR Code 用）。可在 config.js 設定 publicBaseUrl。 */
+export function pageUrl(page) {
+  const base = CFG.publicBaseUrl ? CFG.publicBaseUrl.replace(/\/?$/, '/') : new URL('.', location.href).href;
+  return new URL(page, base).href;
 }
 
 /** 伺服器時間差（毫秒）：serverNow - Date.now() */
 export const clock = { offset: 0, now: () => Date.now() + clock.offset };
 
 /**
- * 透過 Server-Sent Events 訂閱畫面資料；斷線會自動重連。
- * onState(view) 每次資料變動都會呼叫；onGone(err) 表示憑證失效。
+ * 訂閱課堂畫面資料：
+ *   1. Supabase Realtime 收到 c606_signals 版本變動 → 重新讀取本人可見的畫面資料（c606_view）
+ *   2. 骰子動畫結束時間（wakeAt）到時自動重讀，取得剛放行的代碼
+ *   3. 備援輪詢：Realtime 未連上每 2 秒、連上後每 15 秒
+ * opts: {as, cred, onState, onGone, presenceId(): string|null, onPresence(Set<studentId>)}
  */
-export function subscribe(url, { onState, onGone }) {
+export function watchRoom(code, opts) {
   const badge = el('div', { class: 'conn off' }, '連線中');
   document.body.append(badge);
-  let es;
-  let retry = 0;
-  const open = () => {
-    es = new EventSource(url);
-    es.addEventListener('state', (e) => {
-      retry = 0;
-      badge.className = 'conn';
-      badge.textContent = '已連線';
-      const view = JSON.parse(e.data);
-      clock.offset = view.serverNow - Date.now();
-      onState(view);
-    });
-    es.addEventListener('gone', (e) => {
-      es.close();
-      onGone?.(JSON.parse(e.data));
-    });
-    es.onerror = async () => {
-      badge.className = 'conn off';
-      badge.textContent = '重新連線中⋯';
-      if (es.readyState === EventSource.CLOSED) {
-        // 伺服器回應錯誤（例如憑證失效）時 EventSource 不會自動重試
-        es.close();
-        const probe = url.replace('/events?', '/state?');
-        try {
-          await api(probe);
-        } catch (err) {
-          if (err.status === 401 || err.status === 403 || err.status === 404) return onGone?.({ error: err.message, status: err.status });
-        }
-        setTimeout(open, Math.min(8000, 1000 * 2 ** retry++));
-      }
-    };
+  let version = -1;
+  let stopped = false;
+  let inflight = false;
+  let again = false;
+  let subscribed = false;
+  let tracked = null;
+  let wakeTimer = null;
+  let pollTimer = null;
+
+  const setBadge = (ok) => {
+    badge.className = ok ? 'conn' : 'conn off';
+    badge.textContent = ok ? (subscribed ? '已連線' : '已連線（輪詢）') : '重新連線中⋯';
   };
-  open();
-  return () => es && es.close();
+  const apply = (v) => {
+    if (!v || v.version < version) return;
+    version = v.version;
+    clock.offset = v.serverNow - Date.now();
+    clearTimeout(wakeTimer);
+    if (v.wakeAt) wakeTimer = setTimeout(refresh, Math.max(0, v.wakeAt - clock.now()) + 80);
+    opts.onState(v);
+    ensureTrack();
+  };
+
+  async function refresh() {
+    if (stopped) return;
+    if (inflight) { again = true; return; }
+    inflight = true;
+    try {
+      apply(await rpc('c606_view', { p_code: code, p_as: opts.as, p_cred: opts.cred ?? null }));
+      setBadge(true);
+    } catch (err) {
+      if ([401, 403, 404].includes(err.status)) { stop(); opts.onGone?.({ error: err.message, status: err.status }); return; }
+      setBadge(false);
+    } finally {
+      inflight = false;
+      if (again) { again = false; refresh(); }
+    }
+  }
+
+  let channel = null;
+  async function ensureTrack() {
+    const id = opts.presenceId?.();
+    if (!channel || !subscribed || !id || tracked === id) return;
+    tracked = id;
+    try { await channel.track({ sid: id }); } catch {}
+  }
+  try {
+    channel = sb().channel(`c606:${code}`);
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'c606_signals', filter: `room_code=eq.${code}` }, () => refresh());
+    if (opts.onPresence) {
+      channel.on('presence', { event: 'sync' }, () => {
+        const ids = new Set();
+        for (const metas of Object.values(channel.presenceState())) for (const m of metas) if (m.sid) ids.add(m.sid);
+        opts.onPresence(ids);
+      });
+    }
+    channel.subscribe((status) => {
+      subscribed = status === 'SUBSCRIBED';
+      if (subscribed) { tracked = null; ensureTrack(); refresh(); }
+      setBadge(true);
+    });
+  } catch {}
+
+  const loop = () => { pollTimer = setTimeout(() => { refresh(); loop(); }, subscribed ? 15000 : 2000); };
+  loop();
+  refresh();
+  const onVisible = () => document.visibilityState === 'visible' && refresh();
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('online', refresh);
+
+  function stop() {
+    stopped = true;
+    clearTimeout(wakeTimer);
+    clearTimeout(pollTimer);
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('online', refresh);
+    if (channel) try { sb().removeChannel(channel); } catch {}
+    badge.remove();
+  }
+  return { refresh, apply, stop };
+}
+
+/** 學生報到 QR Code（qrcode-generator，GIF data URL） */
+export function qrDataUrl(text) {
+  const qr = window.qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createDataURL(10, 2);
+}
+
+/** 尚未設定 Supabase 時顯示的提示 */
+export function configMissing(root) {
+  root.replaceChildren(el('main', { class: 's-screen' },
+    el('h1', { class: 'title-606 gold-text' }, '606 情報局'),
+    el('p', { class: 'missing-room' }, '網站尚未設定 Supabase 連線。請依 README 建立 config.js（填入 Supabase Project URL 與 anon key）。'),
+  ));
 }
 
 let toastTimer;
@@ -125,7 +214,7 @@ export function endingArtEl(ending) {
   const side = ending.img === 'end-agents' ? 'left' : 'right';
   const isReverse = ending.type === 'spy_reverse';
   return el('div', { class: 'ending-art', 'data-ending': ending.type },
-    el('img', { src: `/img/${ending.img}.webp`, alt: '' }),
+    el('img', { src: `img/${ending.img}.webp`, alt: '' }),
     el('div', { class: `ending-panel ${side}${isReverse ? ' reverse' : ''}` },
       el('div', { class: 'laurels', 'aria-hidden': 'true' }, '❦ ✦ ❦'),
       el('h2', { class: 'gold-text' }, ending.title),
@@ -143,8 +232,8 @@ export function endingRevealEl(ending) {
 }
 
 export const CARD_IMG = {
-  agent: (v) => `/img/agent-${v || 'm'}.webp`,
-  spy: (v) => `/img/spy-${v || 'm'}.webp`,
-  insider: () => '/img/insider.webp',
+  agent: (v) => `img/agent-${v || 'm'}.webp`,
+  spy: (v) => `img/spy-${v || 'm'}.webp`,
+  insider: () => 'img/insider.webp',
 };
 export const ROLE_NAME = { agent: '情報員', spy: '臥底', insider: '局內人（觀察員）' };

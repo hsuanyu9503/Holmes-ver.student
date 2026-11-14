@@ -1,4 +1,4 @@
-import { el, qs, api, toast, subscribe, roomFromUrl, pad2, crest, boardEl, endingArtEl, endingRevealEl, CARD_IMG, ROLE_NAME } from './common.js';
+import { el, qs, rpc, toast, watchRoom, configured, configMissing, roomFromUrl, pad2, crest, boardEl, endingArtEl, endingRevealEl, CARD_IMG, ROLE_NAME } from './common.js';
 
 const app = qs('#app');
 const room = roomFromUrl();
@@ -24,26 +24,30 @@ let view = null;
 let screenKey = '';
 let showMine = false; // 公開情報卡後，是否切回查看自己的身分卡
 let flipping = false;
-let unsubscribe = null;
+let watcher = null;
 
 init();
 
 async function init() {
+  if (!configured()) return configMissing(app);
   if (!room) return renderMissing('請使用老師提供的 QR Code 進入連線任務。');
   try {
-    await api(`/api/rooms/${room}`);
+    if (!(await rpc('c606_room_exists', { p_code: room }))) return renderMissing('找不到這個課堂，請重新掃描老師提供的 QR Code。');
   } catch (err) {
-    return renderMissing(err.status === 404 ? '找不到這個課堂，請重新掃描老師提供的 QR Code。' : err.message);
+    return renderMissing(err.message);
   }
   if (token) connect();
   else renderLogin();
 }
 
 function connect() {
-  unsubscribe?.();
-  unsubscribe = subscribe(`/api/rooms/${room}/events?as=student&token=${encodeURIComponent(token)}`, {
+  watcher?.stop();
+  watcher = watchRoom(room, {
+    as: 'student',
+    cred: token,
+    presenceId: () => view?.me?.id || null,
     onState: (v) => { view = v; render(); },
-    onGone: () => { storage.clear(); token = null; unsubscribe?.(); screenKey = ''; renderLogin(); },
+    onGone: () => { storage.clear(); token = null; screenKey = ''; renderLogin(); },
   });
 }
 
@@ -81,7 +85,7 @@ function renderLogin() {
     if (!group) { err.textContent = '請點選你的組別'; return; }
     submit.disabled = true;
     try {
-      const res = await api(`/api/rooms/${room}/join`, { name, group });
+      const res = await rpc('c606_join', { p_code: room, p_name: name, p_group: group });
       token = res.token;
       storage.set(token);
       connect();
@@ -143,7 +147,7 @@ function buildWait(v) {
 function buildIdentity(v) {
   const card = el('button', { class: 'flipcard', type: 'button', 'aria-label': '點選卡面確認你的身分', onclick: onFlip },
     el('div', { class: 'inner' },
-      el('div', { class: 'face back' }, el('img', { src: '/img/card-back.webp', alt: '身分卡背面' })),
+      el('div', { class: 'face back' }, el('img', { src: 'img/card-back.webp', alt: '身分卡背面' })),
       el('div', { class: 'face front' }, el('img', { alt: '' })),
     ),
   );
@@ -206,12 +210,11 @@ async function onFlip() {
   flipping = true;
   fc.disabled = true;
   try {
-    const v = await api(`/api/rooms/${room}/flip`, { token });
+    const v = await rpc('c606_flip', { p_code: room, p_token: token });
     const img = setFront(v.card);
     await (img.decode ? img.decode().catch(() => {}) : Promise.resolve());
     fc.classList.add('flipped');
-    view = v;
-    setTimeout(() => { flipping = false; render(); }, 950);
+    setTimeout(() => { flipping = false; watcher.apply(v); render(); }, 950);
   } catch (err) {
     flipping = false;
     fc.disabled = false;

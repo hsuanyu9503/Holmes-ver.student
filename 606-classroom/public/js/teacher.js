@@ -1,4 +1,4 @@
-import { el, qs, api, toast, subscribe, roomFromUrl, pad2, crest, clock, boardEl, endingRevealEl } from './common.js';
+import { el, qs, rpc, toast, watchRoom, configured, configMissing, pageUrl, qrDataUrl, roomFromUrl, pad2, crest, clock, boardEl, endingRevealEl } from './common.js';
 
 const app = qs('#app');
 const room = roomFromUrl();
@@ -9,11 +9,14 @@ let panelKey = '';
 let manage = false;
 let picked = null; // 最後一猜：老師點選的詞語
 let busy = false;
+let watcher = null;
+let online = new Set();
 const draft = { title: '', words: Array(9).fill('') };
 
 init();
 
 function init() {
+  if (!configured()) return configMissing(app);
   const hashKey = new URLSearchParams(location.hash.slice(1)).get('k');
   try {
     if (hashKey) localStorage.setItem(keyStore, hashKey);
@@ -26,7 +29,7 @@ function init() {
     app.replaceChildren(el('main', { class: 'card-p', style: { maxWidth: '560px', margin: '12vh auto' } },
       el('h2', {}, '無法開啟課堂控制台'),
       el('p', {}, '這台裝置沒有此課堂的教師金鑰。請回到首頁建立新課堂，或使用建立課堂時的「教師控制台連結」開啟。'),
-      el('a', { class: 'btn-gold', href: '/', style: { textAlign: 'center', textDecoration: 'none' } }, '回到首頁'),
+      el('a', { class: 'btn-gold', href: 'index.html', style: { textAlign: 'center', textDecoration: 'none' } }, '回到首頁'),
     ));
     return;
   }
@@ -34,12 +37,15 @@ function init() {
     el('header', { class: 't-bar', id: 'bar' }),
     el('div', { class: 't-main' }, el('section', { class: 't-groups', id: 'groups' }), el('aside', { class: 't-panel', id: 'panel' })),
   );
-  subscribe(`/api/rooms/${room}/events?as=teacher&key=${encodeURIComponent(key)}`, {
+  watcher = watchRoom(room, {
+    as: 'teacher',
+    cred: key,
     onState: (v) => { view = v; render(); },
+    onPresence: (ids) => { online = ids; if (view) { renderGroups(); renderBar(); } },
     onGone: (e) => {
       app.replaceChildren(el('main', { class: 'card-p', style: { maxWidth: '560px', margin: '12vh auto' } },
         el('h2', {}, '課堂已失效'), el('p', {}, e.error || '找不到這個課堂或教師金鑰錯誤。'),
-        el('a', { class: 'btn-gold', href: '/', style: { textAlign: 'center', textDecoration: 'none' } }, '回到首頁')));
+        el('a', { class: 'btn-gold', href: 'index.html', style: { textAlign: 'center', textDecoration: 'none' } }, '回到首頁')));
     },
   });
 }
@@ -48,8 +54,7 @@ async function act(action, payload = {}) {
   if (busy) return;
   busy = true;
   try {
-    view = await api(`/api/rooms/${room}/teacher`, { key, action, ...payload });
-    render();
+    watcher.apply(await rpc('c606_teacher', { p_code: room, p_key: key, p_action: action, p_payload: payload }));
     return true;
   } catch (err) {
     toast(err.message);
@@ -102,7 +107,7 @@ function renderGroups() {
         'aria-pressed': String(isSel),
         disabled: !lobby && !manage,
         onclick: () => lobby && !manage && act('select', { group: g, studentId: isSel ? null : s.id }),
-      }, el('span', { class: 'dot' + (s.online ? ' on' : ''), title: s.online ? '在線' : '離線' }), s.name);
+      }, el('span', { class: 'dot' + (online.has(s.id) ? ' on' : ''), title: online.has(s.id) ? '在線' : '離線' }), s.name);
       if (!lobby && (s.isPlayer || s.flipped)) b.append(el('span', { class: 'flip' + (s.flipped ? ' yes' : '') }, s.flipped ? '已翻牌' : '未翻牌'));
       if (manage) {
         const m = el('span', { class: 'mgmt' });
@@ -261,23 +266,23 @@ function confirmBox(title, text, onOk) {
   ));
 }
 function showQr() {
-  const url = `${location.origin}/j/${room}`;
+  const url = pageUrl(`join.html?room=${room}`);
   const bg = modal(el('div', { class: 'modal qr-modal' },
     el('h3', {}, '掃碼加入情報任務'),
-    el('img', { src: `/api/rooms/${room}/qr.svg`, alt: '學生報到 QR Code' }),
+    el('img', { src: qrDataUrl(url), alt: '學生報到 QR Code' }),
     el('div', { class: 'url' }, url.replace(/^https?:\/\//, '')),
     el('button', { class: 'btn-line', type: 'button', onclick: () => bg.remove() }, '關閉'),
   ));
 }
 function showLinks() {
-  const screenUrl = `${location.origin}/s/${room}`;
+  const screenUrl = pageUrl(`screen.html?room=${room}`);
   const bg = modal(el('div', { class: 'modal' },
     el('h3', {}, '教室大螢幕'),
     el('div', { class: 'links' },
       el('p', {}, '在接投影機的電腦開啟下列網址，按「全螢幕」即可。投影畫面只顯示公開資訊。'),
       el('code', {}, screenUrl),
       el('p', {}, '在其他裝置繼續操作控制台（含教師金鑰，請勿外流）：'),
-      el('code', {}, `${location.origin}/teacher.html?room=${room}#k=${key}`),
+      el('code', {}, `${pageUrl(`teacher.html?room=${room}`)}#k=${key}`),
     ),
     el('div', { class: 'row' },
       el('a', { class: 'btn-line', href: screenUrl, target: '_blank', rel: 'noopener' }, '在新分頁開啟'),
