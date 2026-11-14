@@ -4,6 +4,9 @@
 //   → 下一輪部分換人（重投平手 → 臥底勝利）
 //   → 第 3 輪（指認錯人 → 臥底勝利）
 //   → 第 4 輪（臥底被指認、猜中 → 臥底逆轉勝利）
+// 需要一個已套用 supabase/migrations 的 Supabase（見 README「測試」）：
+//   SUPABASE_URL、SUPABASE_ANON_KEY、DATABASE_URL（用來檢查伺服器端的身分與代碼）
+//   未設定時預設連到本機 Docker 測試堆疊（tests/e2e/local-gateway.mjs）。
 // 用法：node tests/e2e/classroom.e2e.mjs [截圖輸出資料夾]
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -11,23 +14,41 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const require = createRequire(import.meta.url);
-const { createApp } = require('../../server/app.js');
+const pg = require('pg');
+import { createStaticServer } from '../../tools/serve.mjs';
+import { createGateway, anonKey } from './local-gateway.mjs';
 const { chromium } = require('playwright');
 
 const SHOTS = process.argv[2] ? path.resolve(process.argv[2]) : null;
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
-const app = createApp({ dataDir: null });
-await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
-const BASE = `http://127.0.0.1:${app.server.address().port}`;
+let SUPABASE_URL = process.env.SUPABASE_URL;
+let ANON = process.env.SUPABASE_ANON_KEY;
+let gateway = null;
+if (!SUPABASE_URL) {
+  gateway = createGateway();
+  await new Promise((r) => gateway.listen(0, '127.0.0.1', r));
+  SUPABASE_URL = `http://127.0.0.1:${gateway.address().port}`;
+  ANON = anonKey(process.env.JWT_SECRET || 'super-secret-jwt-token-with-at-least-32-characters-long');
+}
+const db = new pg.Client({ connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:54322/postgres' });
+await db.connect();
+const web = createStaticServer({ supabaseUrl: SUPABASE_URL, supabaseAnonKey: ANON });
+await new Promise((r) => web.listen(0, '127.0.0.1', r));
+const BASE = `http://127.0.0.1:${web.address().port}`;
 const browser = await chromium.launch();
 const log = (...a) => console.log('•', ...a);
 let failed = false;
 
-async function post(p, body) {
-  const res = await fetch(BASE + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+/** 以 anon key 呼叫資料庫函式（與瀏覽器相同的權限） */
+async function rpc(fn, args) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
+    body: JSON.stringify(args),
+  });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error);
+  if (!res.ok) throw new Error(data.message || JSON.stringify(data));
   return data;
 }
 async function shot(page, name) {
@@ -44,7 +65,7 @@ try {
     p.on('console', (m) => m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && errors.push(`${label}: ${m.text()}`));
   };
   watch(teacher, 'teacher');
-  await teacher.goto(BASE + '/');
+  await teacher.goto(BASE + '/index.html');
   await shot(teacher, '00-home');
   await teacher.click('#create');
   await teacher.waitForURL(/teacher\.html\?room=/);
@@ -57,7 +78,7 @@ try {
   const dctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const screen = await dctx.newPage();
   watch(screen, 'screen');
-  await screen.goto(`${BASE}/s/${code}`);
+  await screen.goto(`${BASE}/screen.html?room=${code}`);
   await screen.waitForSelector('.count .num');
   assert.equal(await screen.textContent('.lobby-title'), '606 情報局｜任務集結中');
 
@@ -68,7 +89,7 @@ try {
     const ctx = await browser.newContext({ viewport: name === '陳大文' ? { width: 390, height: 844 } : { width: 1180, height: 820 }, hasTouch: true });
     const p = await ctx.newPage();
     watch(p, name);
-    await p.goto(`${BASE}/j/${code}`);
+    await p.goto(`${BASE}/join.html?room=${code}`);
     await p.waitForSelector('.login-card');
     assert.equal(await p.locator('text=房間').count(), 0, 'no room code on login');
     if (name === '王小明') await shot(p, '01-student-login');
@@ -92,7 +113,7 @@ try {
   const sizes = { 1: 3, 2: 3, 3: 3, 4: 4, 5: 4, 6: 3 };
   let n = 0;
   for (const g of [1, 2, 3, 4, 5, 6]) for (let i = 0; i < sizes[g]; i++) {
-    const r = await post(`/api/rooms/${code}/join`, { name: `同學${String(++n).padStart(2, '0')}`, group: g });
+    const r = await rpc('c606_join', { p_code: code, p_name: `同學${String(++n).padStart(2, '0')}`, p_group: g });
     api.push({ ...r, group: g });
   }
   await screen.waitForFunction(() => document.querySelector('.count .num')?.textContent === '23');
@@ -100,9 +121,24 @@ try {
   await shot(screen, '03-screen-lobby-23');
   await teacher.waitForFunction(() => document.querySelector('#count b')?.textContent === '23');
 
-  const room = app.store.get(code);
-  const idOf = (name) => Object.values(room.students).find((s) => s.name === name).id;
-  const tokenOf = (id) => room.students[id].token;
+  // Realtime：學生報到後大螢幕應在 2 秒內更新（備援輪詢在連上 Realtime 後為 15 秒一次）
+  assert.equal(await screen.textContent('.conn'), '已連線', 'display subscribed to Supabase Realtime');
+  const t0 = Date.now();
+  const extra = await rpc('c606_join', { p_code: code, p_name: '即時測試', p_group: 6 });
+  await screen.waitForFunction(() => document.querySelector('.count .num')?.textContent === '24', null, { timeout: 4000 });
+  log(`Realtime：報到後 ${Date.now() - t0} ms 大螢幕更新為 24 人`);
+  await db.query('delete from c606_private.students where id=$1', [extra.studentId]);
+  await db.query('select c606_private.touch($1)', [code]);
+  await screen.waitForFunction(() => document.querySelector('.count .num')?.textContent === '23');
+
+  const ids = new Map((await db.query('select id, name from c606_private.students where room_code=$1', [code])).rows.map((x) => [x.name, x.id]));
+  const idOf = (name) => ids.get(name);
+  /** 從資料庫讀取本輪的伺服器端資料（只有測試能看到） */
+  async function snap() {
+    const r = (await db.query('select * from c606_private.rounds where room_code=$1', [code])).rows[0];
+    const roles = Object.fromEntries((await db.query('select student_id, role from c606_private.round_roles where room_code=$1', [code])).rows.map((x) => [x.student_id, x.role]));
+    return { players: r.players, roles, spyId: r.spy_id, secretCode: r.secret_code, dice: { blue: r.blue, red: r.red } };
+  }
 
   async function selectPlayers(names) {
     for (const nm of names) {
@@ -127,7 +163,7 @@ try {
     for (const t of tablets) await t.page.waitForSelector('.flipcard:not(.flipped)');
     if (shotPrefix) await shot(tablets[0].page, `${shotPrefix}-student-cardback`);
 
-    const r = room.round;
+    let r = await snap();
     const playerIds = Object.values(r.players);
     const roleOfName = (nm) => r.roles[idOf(nm)];
     const tabletPlayers = tablets.filter((t) => playerIds.includes(idOf(t.name)));
@@ -144,15 +180,15 @@ try {
       await t.page.waitForTimeout(1000);
     }
     // API：全部局內人翻牌，但 API 玩家只翻到剩一人 → 教師仍需等待
-    for (const s of apiInsiders) await post(`/api/rooms/${code}/flip`, { token: s.token });
+    for (const s of apiInsiders) await rpc('c606_flip', { p_code: code, p_token: s.token });
     const holdout = apiPlayers[apiPlayers.length - 1];
-    for (const s of apiPlayers.slice(0, -1)) await post(`/api/rooms/${code}/flip`, { token: s.token });
+    for (const s of apiPlayers.slice(0, -1)) await rpc('c606_flip', { p_code: code, p_token: s.token });
     await teacher.waitForFunction(() => document.querySelector('#playersMeter .val')?.textContent.startsWith('5'));
     assert.ok(await teacher.isDisabled('#rollBtn'), 'roll disabled at 5/6 even with all insiders flipped');
     const insiderMeter = (await teacher.textContent('.meter.minor .val')).trim();
     log(`第 ${rn} 輪：玩家已翻牌 5／6、局內人已翻牌 ${insiderMeter} → 擲骰按鈕停用 ✓`);
     if (shotPrefix) await shot(teacher, `${shotPrefix}-teacher-flip-5of6`);
-    await post(`/api/rooms/${code}/flip`, { token: holdout.token });
+    await rpc('c606_flip', { p_code: code, p_token: holdout.token });
     await teacher.waitForSelector('#rollBtn:not([disabled])');
     if (tabletInsiders.length) log(`第 ${rn} 輪：六名玩家已翻牌、仍有平板局內人未翻牌 → 擲骰按鈕可用 ✓`);
     // 平板局內人此時仍未翻牌，也能擲骰
@@ -160,6 +196,7 @@ try {
 
     await teacher.click('#rollBtn');
     await screen.waitForSelector('.die.rolling');
+    r = await snap();
     if (shotPrefix) await shot(screen, `${shotPrefix}-screen-dice-rolling`);
     // 揭曉前，玩家平板的金框是空白
     for (const t of tabletPlayers) assert.equal((await t.page.textContent('.codebox')).trim(), '');
@@ -255,7 +292,7 @@ try {
   assert.equal(pre.length, 6, 'previous six preselected');
   await selectPlayers([g(1), g(2)]);
   await playRound({ rn: 2, players: [g(1), g(2), '陳大文', g(4), g(5), g(6)], ending: 'tie', shotPrefix: 'r2' });
-  assert.equal(room.round.roles[idOf('王小明')], 'insider');
+  assert.equal((await snap()).roles[idOf('王小明')], 'insider');
 
   // 第 3、4 輪：王小明換回玩家
   await teacher.click('#nextBtn');
@@ -271,7 +308,8 @@ try {
   console.error('✗ E2E 失敗：', err);
 } finally {
   await browser.close();
-  app.server.closeAllConnections?.();
-  app.server.close();
+  await db.end();
+  web.close();
+  gateway?.close();
   process.exit(failed ? 1 : 0);
 }

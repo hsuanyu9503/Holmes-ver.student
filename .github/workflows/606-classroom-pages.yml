@@ -1,0 +1,45 @@
+# 將 606-classroom/public 部署到 GitHub Pages。
+# 需先在 Settings → Secrets and variables → Actions → Variables 設定：
+#   C606_SUPABASE_URL、C606_SUPABASE_ANON_KEY（選填 C606_PUBLIC_BASE_URL）
+# 並在 Settings → Pages 將 Source 設為「GitHub Actions」。未設定變數時本工作流程會略過。
+name: 606 classroom → GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - '606-classroom/public/**'
+      - '.github/workflows/606-classroom-pages.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.C606_SUPABASE_URL != '' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write config.js
+        env:
+          SUPABASE_URL: ${{ vars.C606_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.C606_SUPABASE_ANON_KEY }}
+          PUBLIC_BASE_URL: ${{ vars.C606_PUBLIC_BASE_URL }}
+        run: |
+          node -e 'const c={supabaseUrl:process.env.SUPABASE_URL,supabaseAnonKey:process.env.SUPABASE_ANON_KEY,publicBaseUrl:process.env.PUBLIC_BASE_URL||""};require("fs").writeFileSync("606-classroom/public/config.js","window.INTEL606_CONFIG = "+JSON.stringify(c,null,2)+";\n")'
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: 606-classroom/public
+      - id: deployment
+        uses: actions/deploy-pages@v4

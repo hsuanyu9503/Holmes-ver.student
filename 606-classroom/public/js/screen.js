@@ -1,4 +1,4 @@
-import { el, qs, subscribe, roomFromUrl, pad2, crest, clock, boardEl, endingArtEl, endingRevealEl } from './common.js';
+import { el, qs, watchRoom, configured, configMissing, roomFromUrl, pad2, crest, clock, boardEl, endingArtEl, endingRevealEl } from './common.js';
 
 const app = qs('#app');
 const room = roomFromUrl();
@@ -9,10 +9,13 @@ const fsBtn = el('button', { class: 'btn-line fs-btn', type: 'button', onclick: 
 document.body.append(fsBtn);
 document.addEventListener('fullscreenchange', () => { fsBtn.hidden = !!document.fullscreenElement; });
 
-if (!room) {
+if (!configured()) {
+  configMissing(app);
+} else if (!room) {
   app.replaceChildren(el('main', { class: 'd-screen' }, el('p', { class: 'd-msg' }, '請由教師控制台開啟投影畫面。')));
 } else {
-  subscribe(`/api/rooms/${room}/events?as=display`, {
+  watchRoom(room, {
+    as: 'display',
     onState: render,
     onGone: () => app.replaceChildren(el('main', { class: 'd-screen' }, el('p', { class: 'd-msg' }, '找不到這個課堂。'))),
   });
