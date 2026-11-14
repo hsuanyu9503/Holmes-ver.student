@@ -1,0 +1,2 @@
+[functions.intel606-voice-token]
+verify_jwt = true
