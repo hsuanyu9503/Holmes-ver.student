@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Iansui&display=swap">
 <link rel="stylesheet" href="assets/online-v2.8.0-stable.css">
+<link rel="stylesheet" href="assets/classroom-v2.9.0.css">
 <style id="settings-critical-style">
 /* v2.6.0 R1：設定入口不依賴外部 CSS 的快取狀態 */
 .topbar{position:relative}.top-links{margin-left:auto}
@@ -43,12 +44,16 @@
   <main id="app" hidden>
     <section id="landing" class="landing">
       <article class="panel landing-card"><span class="kicker">MISSION COMMAND</span><h2>建立機密房間</h2><p>主控端負責任務配置、情報卡管理與公開揭曉。</p>
-        <label>情報表尺寸<select id="createSize"><option value="3">3 × 3 · 9 格</option><option value="4">4 × 4 · 16 格</option></select></label>
+        <label id="createSizeField">情報表尺寸<select id="createSize"><option value="3">3 × 3 · 9 格</option><option value="4">4 × 4 · 16 格</option></select></label>
         <fieldset class="mode-selection" aria-label="選擇連線遊戲方式">
           <legend>遊戲方式</legend>
-          <label class="mode-card"><input type="radio" name="createPlayMode" value="near" checked><span><strong>近距任務</strong><small>現場口頭發言、討論與投票（沿用原有流程）</small></span></label>
+          <label class="mode-card"><input type="radio" name="createPlayMode" value="classroom" checked><span><strong>近距課堂</strong><small>老師一台平板帶全班：學生掃碼報到，每輪六組各派一人上場（固定 3×3）</small></span></label>
+          <label class="mode-card"><input type="radio" name="createPlayMode" value="near"><span><strong>近距小組</strong><small>3～8 人各用一台裝置，現場口頭發言、討論與投票（原有流程）</small></span></label>
           <label class="mode-card"><input type="radio" name="createPlayMode" value="remote"><span><strong>遠距任務</strong><small>選擇文字推理或即時語音推理，使用不同裝置連線</small></span></label>
         </fieldset>
+        <div id="classroomSetup" class="remote-setup" hidden>
+          <p class="r1-context-note">建立後進入教師控制台：投影「教室大螢幕」連結、讓學生掃描 QR Code 報到，再從第 1～6 組各點選一名玩家。其餘學生為局內人（觀察員）。請先在情報卡資料庫建立至少一張啟用的 3×3 情報卡。</p>
+        </div>
         <div id="nearTimerSetup" class="remote-setup">
           <label>近距討論計時<select id="createNearTimerMode"><option value="timed" selected>啟用同步倒數（時間到提醒，不自動揭曉）</option><option value="manual">不使用討論倒數</option></select></label>
           <label id="nearTimerMinutesField">討論時間（1～60 分鐘）<input id="createNearMinutes" type="number" min="1" max="60" step="1" value="5" inputmode="numeric"></label>
@@ -65,7 +70,7 @@
           <div id="discussionTimerFields" hidden><label>討論時間<select id="createDiscussionSeconds"><option value="180">3 分鐘</option><option value="300" selected>5 分鐘</option><option value="480">8 分鐘</option><option value="600">10 分鐘</option></select></label></div>
           <p class="r1-context-note">遠距正式線索、自由討論、秘密投票、臥底猜測與結算皆已開放。</p>
         </div>
-        <div class="host-options">
+        <div class="host-options" id="hostOptions">
           <label class="host-option-check"><input type="checkbox" id="createHostPlays"> <span>主控端同時參與遊戲（占用一個玩家名額）</span></label>
           <label id="hostNameLabel" hidden>主控玩家代稱<input id="createHostName" maxlength="24" placeholder="例如：情報局長"></label>
           <label>主持方式<select id="createHostMode"><option value="manual">手動主持｜自行控制各遊戲階段</option><option value="auto">自動主持｜系統推進遠距遊戲流程</option></select></label>
@@ -150,7 +155,7 @@
       </article><article class="panel"><div class="split-title"><h3>現有情報卡</h3><span id="libraryCount"></span></div><div id="cardList" class="card-list">尚無情報卡。</div></article></div>
     </section>
   </main>
-  <footer>606 INTELLIGENCE BUREAU · 連線遊戲僅同步必要資訊 · 身分與答案由伺服器保護 · v2.8.0 Stable</footer>
+  <footer>606 INTELLIGENCE BUREAU · 連線遊戲僅同步必要資訊 · 身分與答案由伺服器保護 · v2.9.0 Classroom</footer>
 </div>
 <dialog id="myRoomsDialog" class="settings-dialog my-rooms-dialog" aria-labelledby="myRoomsTitle">
   <div class="settings-header"><div><span class="kicker">ROOM ARCHIVE</span><h2 id="myRoomsTitle">我的房間</h2></div><button class="settings-close" id="closeMyRooms" type="button" aria-label="關閉房間管理">✕</button></div>
@@ -288,5 +293,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.min.js" defer></script>
 <script src="assets/qr-local-v2.5.7.js" defer></script>
 <script src="assets/voice-v2.8.0-stable.js" defer></script>
-<script src="assets/online-v2.8.0-stable.js" defer></script>
+<script src="assets/classroom-v2.9.0.js" defer></script>
+<script src="assets/online-v2.9.0-classroom.js" defer></script>
 </body></html>

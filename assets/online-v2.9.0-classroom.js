@@ -1,4 +1,4 @@
-/* 606 情報局｜連線版 v2.8.0 Stable。公開 Supabase 設定由瀏覽器管理，私密資料仍僅來自經授權的 SQL RPC。 */
+/* 606 情報局｜連線版 v2.9.0 Classroom（以 v2.8.0 Stable 為基準，新增近距課堂模式入口）。公開 Supabase 設定由瀏覽器管理，私密資料仍僅來自經授權的 SQL RPC。 */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -46,7 +46,7 @@
   const conf = storedConfig() || normalizeConfig(window.INTEL606_SUPABASE || fileConfig);
   const configOK = Boolean(conf);
   // 供設定介面與遊戲核心查核是否使用同一份設定，不包含私人答案或伺服器密鑰。
-  window.INTEL606_RUNTIME = {version:'2.8.0-stable', configured:configOK, source: storedConfig() ? 'localStorage' : 'online-config.js'};
+  window.INTEL606_RUNTIME = {version:'2.9.0-classroom', configured:configOK, source: storedConfig() ? 'localStorage' : 'online-config.js'};
   const esc = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const playerLabel = no => String(no).padStart(2,'0') + ' 號玩家';
   const show = (id, visible) => { $(id).hidden = !visible; };
@@ -87,6 +87,10 @@
       if(mode==='guest') {
         auth.storage = window.sessionStorage;
         auth.storageKey = 'intel606_guest_auth_' + new URL(conf.url).hostname;
+      } else if(mode==='student' || mode==='display') {
+        // 課堂學生平板／教室大螢幕：保留在 localStorage，重整或重新掃碼都沿用同一身分，不重複報到。
+        auth.storage = window.localStorage;
+        auth.storageKey = 'intel606_class_' + mode + '_auth_' + new URL(conf.url).hostname;
       }
       clients[mode] = window.supabase.createClient(conf.url,conf.publishableKey,{auth});
     }
@@ -146,13 +150,14 @@
   function requestBusy(isBusy) {
     busy = isBusy;
     for (const b of document.querySelectorAll('button')) {
-      if (!b.dataset.always) b.disabled = isBusy;
+      if (!b.dataset.always && !b.closest('#classroomRoot')) b.disabled = isBusy; // 課堂畫面自行管理按鈕狀態
     }
   }
   async function rpc(name, args = {}) {
     const { data,error } = await db.rpc(name,args);
     if (error) {
       const message=error.message || '伺服器操作失敗';
+      if (/Could not find the function.*intel606_(create_classroom_room|class_)/i.test(message)) throw new Error('資料庫尚未執行 v2.9.0 近距課堂升級 SQL（supabase/606-v2.8.0-to-v2.9.0-classroom-upgrade.sql）。');
       if (/Could not find the function.*intel606_(create_room_v28|complete_voice_clue)/i.test(message)) throw new Error('資料庫尚未執行 v2.8.0 遠距雙模式升級 SQL。');
       if (/Could not find the function.*intel606_(create_room_v27|list_my_rooms|manage_owned_room|auto_advance)/i.test(message)) throw new Error('資料庫缺少 v2.7.0 所需函式；請檢查 Supabase SQL 部署。');
       if (/Could not find the function.*intel606_(vote_control|cast_vote)|function.*intel606_(vote_control|cast_vote).*not found/i.test(message)) throw new Error('資料庫尚未執行 R4 升級 SQL，請先更新 Supabase。');
@@ -171,6 +176,12 @@
     show('landing',which === 'landing');show('room',which === 'room');show('library',which === 'library');
   }
   async function initialize() {
+    if (window.INTEL606_CLASSROOM?.urlKind) {
+      // 課堂 QR Code（?class=）與投影連結（?screen=）直接進入精簡畫面，不顯示教師管理功能。
+      $('loading').hidden = true;
+      window.INTEL606_CLASSROOM.boot(window.INTEL606_CORE);
+      return;
+    }
     $('loading').hidden = true; $('app').hidden = false;
     const urlRoom = new URLSearchParams(location.search).get('room');
     if (urlRoom) $('joinCode').value = urlRoom.toUpperCase().slice(0,6);
@@ -220,6 +231,13 @@
   }
   async function attachRoom(value, fresh = true) {
     if (!value || !value.room_id) throw new Error('房間資料不正確');
+    if (value.play_mode === 'classroom') {
+      if (!window.INTEL606_CLASSROOM) throw new Error('課堂模式元件未載入，請重新整理頁面。');
+      clearSubscriptions(); room = null;
+      await window.INTEL606_CLASSROOM.teacher(window.INTEL606_CORE, value.room_id);
+      localStorage.setItem(hostRoomKey, value.room_id);
+      return;
+    }
     const idChanged = !room || room.room_id !== value.room_id;
     room = value;
     resetVoteChoiceIfNeeded();
@@ -1052,14 +1070,18 @@
   document.addEventListener('click',e=>{const el=e.target.closest('[data-remove-seat]');if(el)removeRoomMember(Number(el.dataset.removeSeat));});
   const selectedPlayMode = () => document.querySelector('input[name="createPlayMode"]:checked')?.value || 'near';
   function updateCreateModeSettings(){
+    const classroom=selectedPlayMode()==='classroom';
+    show('classroomSetup',classroom);
+    show('createSizeField',!classroom);
+    show('hostOptions',!classroom);
     const remote=selectedPlayMode()==='remote';
     show('remoteSetup',remote);
     const selectedRemote = document.querySelector('input[name="createRemoteMode"]:checked')?.value || 'text';
     const note=$('remoteModeNotice');
     if(note)note.textContent=selectedRemote==='voice'?'語音房間不錄音、不產生逐字稿；開始遊戲前請確認所有玩家可以收聽與開麥。':'文字房間不會啟動 LiveKit；線索與討論紀錄可以回顧。';
     show('discussionTimerFields',remote && $('createDiscussionMode').value==='timed');
-    show('nearTimerSetup',!remote);
-    show('nearTimerMinutesField',!remote && $('createNearTimerMode').value==='timed');
+    show('nearTimerSetup',!remote && !classroom);
+    show('nearTimerMinutesField',!remote && !classroom && $('createNearTimerMode').value==='timed');
     $('createHostMode').disabled=!remote;
     if(!remote)$('createHostMode').value='manual';
     show('hostNameLabel',$('createHostPlays').checked);
@@ -1083,8 +1105,8 @@
       const rows=await rpc('intel606_list_my_rooms');
       list.innerHTML=rows.length?rows.map(r=>{
         const closed=r.phase==='closed';
-        const mode=r.play_mode==='remote'?(r.remote_interaction_mode==='voice'?'遠距語音':'遠距文字'):'近距';
-        return `<div class="my-room-item"><div><strong>${esc(r.code)}</strong> <span>${mode} · ${r.size}×${r.size} · ${r.member_count}位</span>
+        const mode=r.play_mode==='classroom'?'近距課堂':r.play_mode==='remote'?(r.remote_interaction_mode==='voice'?'遠距語音':'遠距文字'):'近距小組';
+        return `<div class="my-room-item"><div><strong>${esc(r.code)}</strong> <span>${mode} · ${r.size}×${r.size} · ${r.member_count}${r.play_mode==='classroom'?' 人報到':'位'}</span>
         <small>第${r.round}輪 · ${esc(stages[r.phase]?.[0]||r.phase)} · ${esc(new Date(r.updated_at).toLocaleString('zh-TW'))}</small></div>
         <div class="my-room-actions">${closed?`<button class="outline compact" type="button" data-room-delete="${esc(r.room_id)}">永久刪除</button>`:
           `<button class="outline compact" type="button" data-room-open="${esc(r.room_id)}">重新進入</button>
@@ -1118,6 +1140,11 @@
   });
   $('createRoom').addEventListener('click',()=>withAction(async()=>{
     await ensureIdentity('host',true);
+    if(selectedPlayMode()==='classroom'){
+      // 近距課堂：固定 3×3，由教師控制平板帶全班；不使用座位、倒數或主控兼玩家設定。
+      await attachRoom(await rpc('intel606_create_classroom_room'));
+      return;
+    }
     const remote=selectedPlayMode()==='remote';
     if($('createHostPlays').checked && !$('createHostName').value.trim()) throw new Error('請輸入主控兼玩家的代稱。');
     const nearEnabled=!remote && $('createNearTimerMode').value==='timed';
@@ -1150,7 +1177,10 @@
   }));
   $('joinCode').addEventListener('input',e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''));
   $('openLibrary').addEventListener('click',()=>withAction(openLibrary));
-  $('closeLibrary').addEventListener('click',()=>setView(room?'room':'landing'));
+  $('closeLibrary').addEventListener('click',()=>{
+    if(!room && window.INTEL606_CLASSROOM?.active()){ setView('landing'); window.INTEL606_CLASSROOM.resume(); return; }
+    setView(room?'room':'landing');
+  });
   function leaveRoom() {
     if(window.INTEL606_VOICE)window.INTEL606_VOICE.leave();
     if(room?.is_host) localStorage.removeItem(hostRoomKey);
@@ -1199,5 +1229,14 @@
       lastDeadlineRefresh=Date.now();refreshRoom();
     }
   },1000);
+  // 近距課堂模組（classroom-v2.9.0.js）透過這個介面共用連線身分、QR Code 與情報卡資料庫；不包含任何機密資料。
+  window.INTEL606_CORE = {
+    conf, configOK,
+    async identity(mode){ await ensureIdentity(mode,true); return {db,user}; },
+    qr: text => qrImageURL(text),
+    publicConfigHash: () => new URLSearchParams({sb_url:conf.url,sb_key:conf.publishableKey}).toString(),
+    openLibrary: () => withAction(openLibrary),
+    leaveToLanding: () => { localStorage.removeItem(hostRoomKey); room=null; setView('landing'); }
+  };
   initialize();
 })();
