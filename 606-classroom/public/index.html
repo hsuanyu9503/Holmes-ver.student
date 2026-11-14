@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c272c">
+  <title>606 情報局｜近距課堂</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700;900&family=Noto+Serif+TC:wght@600;700;900&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/student.css">
+  <link rel="stylesheet" href="/css/teacher.css">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+</head>
+<body class="page-student">
+  <div class="frame"></div>
+  <main class="s-screen login stage" id="home">
+    <div id="crest"></div>
+    <h1 class="title-606 gold-text">606 情報局</h1>
+    <div class="ribbon">近距課堂</div>
+    <div class="login-card">
+      <div class="field-label">教師：建立今天的課堂</div>
+      <p class="hint" style="margin:0;line-height:1.7">建立後會進入課堂控制台，提供學生報到 QR Code 與教室大螢幕網址。</p>
+      <input class="name-input" id="passcode" type="password" placeholder="教師通行碼（若伺服器有設定）" autocomplete="off" hidden>
+      <button class="btn-gold join-btn" id="create" type="button">建立新課堂</button>
+      <p class="login-error" id="err" role="alert"></p>
+      <div id="recent" class="field" hidden>
+        <span>這台裝置最近的課堂</span>
+        <div id="recentList" class="links"></div>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/js/home.js"></script>
+</body>
+</html>
