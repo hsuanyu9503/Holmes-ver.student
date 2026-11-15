@@ -201,8 +201,12 @@ try {
     await screen.waitForSelector('.die.rolling');
     r = await snap();
     if (shotPrefix) await shot(screen, `${shotPrefix}-screen-dice-rolling`);
-    // 揭曉前，玩家平板的金框是空白
-    for (const t of tabletPlayers) assert.equal((await t.page.textContent('.codebox')).trim(), '');
+    // 揭曉前：情報員金框留白，臥底顯示「機密代碼不對你公開」
+    for (const t of tabletPlayers) {
+      const txt = (await t.page.textContent('.codebox')).trim();
+      if (roleOfName(t.name) === 'spy') assert.equal(txt, '機密代碼不對你公開', '臥底：骰子跳動時維持不公開提示');
+      else assert.equal(txt, '', '情報員：代碼公布前金框留白');
+    }
     await screen.waitForSelector('.dice-hint:not(.pending)', { timeout: 6000 });
     const diceTxt = await screen.textContent('.dice-result .val');
     assert.equal(diceTxt.replace(/\s/g, ''), `藍${r.dice.blue}／紅${r.dice.red}`);
