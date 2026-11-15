@@ -106,6 +106,9 @@ try {
 
   // 重整不重複計入
   await tablets[0].page.reload();
+  // 重整會離開全螢幕 → 遮罩，點「回到全螢幕」
+  await tablets[0].page.click('#fsBtn');
+  await tablets[0].page.waitForSelector('.fs-gate', { state: 'detached' });
   await tablets[0].page.waitForSelector('.wait h1');
 
   // ── 其餘 20 人以 API 報到（共 23 人） ──
@@ -198,8 +201,12 @@ try {
     await screen.waitForSelector('.die.rolling');
     r = await snap();
     if (shotPrefix) await shot(screen, `${shotPrefix}-screen-dice-rolling`);
-    // 揭曉前，玩家平板的金框是空白
-    for (const t of tabletPlayers) assert.equal((await t.page.textContent('.codebox')).trim(), '');
+    // 揭曉前：情報員金框留白，臥底顯示「機密代碼不對你公開」
+    for (const t of tabletPlayers) {
+      const txt = (await t.page.textContent('.codebox')).trim();
+      if (roleOfName(t.name) === 'spy') assert.equal(txt, '機密代碼不對你公開', '臥底：骰子跳動時維持不公開提示');
+      else assert.equal(txt, '', '情報員：代碼公布前金框留白');
+    }
     await screen.waitForSelector('.dice-hint:not(.pending)', { timeout: 6000 });
     const diceTxt = await screen.textContent('.dice-result .val');
     assert.equal(diceTxt.replace(/\s/g, ''), `藍${r.dice.blue}／紅${r.dice.red}`);
@@ -210,8 +217,8 @@ try {
     for (const t of tabletPlayers) {
       const role = roleOfName(t.name);
       if (role === 'spy') {
-        await t.page.waitForSelector('.codebox .mission');
-        assert.ok((await t.page.textContent('.codebox')).includes('觀察其他玩家的發言，推理本輪的機密情報。'));
+        await t.page.waitForSelector('.codebox .spy-mission');
+        assert.ok((await t.page.textContent('.codebox')).includes('請保持自然，假裝正在確認情報'));
         assert.ok(!(await t.page.content()).includes(`>${r.secretCode}<`));
         if (shotPrefix) await shot(t.page, `${shotPrefix}-student-spy`);
       } else {

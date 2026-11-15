@@ -128,3 +128,39 @@ body.page-student { min-height: 100dvh; }
   .codebox { width: min(24dvh, 46vw); }
   .codebox .code { font-size: min(12dvh, 24vw); }
 }
+
+/* ── 臥底金框：不公開提示／機密任務 ── */
+.codebox.wide { width: min(470px, 100%); aspect-ratio: auto; min-height: min(32dvh, 27vw, 300px); padding: clamp(14px, 2.4dvh, 24px) clamp(14px, 2.6vw, 28px); }
+.spy-hidden, .spy-mission { display: flex; flex-direction: column; align-items: center; text-align: center; animation: code-in .9s ease-out both; }
+.spy-icon { display: block; width: clamp(64px, 10dvh, 104px); height: auto; }
+.spy-hidden { gap: clamp(10px, 1.8dvh, 16px); }
+.spy-hidden .spy-icon { color: #7f8a7a; opacity: .85; }
+.spy-hidden-text { margin: 0; font-family: var(--serif); font-weight: 900; letter-spacing: .1em; color: #f1e3bf; font-size: clamp(20px, 3.4dvh, 30px); text-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.spy-rule { width: 82%; height: 1px; background: linear-gradient(90deg, transparent, rgba(246, 220, 159, .75), transparent); }
+.spy-mission { gap: clamp(6px, 1.1dvh, 10px); }
+.spy-mission-icon { display: flex; align-items: center; gap: 8px; color: var(--gold); }
+.spy-mission-icon .spy-icon { width: clamp(56px, 8.5dvh, 88px); filter: drop-shadow(0 0 10px rgba(246, 220, 159, .35)); }
+.spy-mission-icon .ray { display: block; width: 18px; height: 2px; border-radius: 2px; background: var(--gold); }
+.spy-mission-icon .l1 { transform: rotate(25deg); } .spy-mission-icon .l2 { transform: rotate(-10deg); width: 12px; }
+.spy-mission-icon .r1 { transform: rotate(10deg); width: 12px; } .spy-mission-icon .r2 { transform: rotate(-25deg); }
+.spy-mission h3 { margin: 0; display: flex; align-items: center; gap: .3em; font-family: var(--serif); font-weight: 900; letter-spacing: .14em; font-size: clamp(26px, 4.8dvh, 42px); line-height: 1.15; }
+.spy-mission .laurel { display: inline-flex; color: var(--gold); }
+.spy-mission .laurel-svg { width: .62em; height: 1.24em; }
+.spy-mission .laurel.r .laurel-svg { transform: scaleX(-1); }
+.spy-lines { margin: 0; font-family: var(--serif); font-weight: 800; color: #f6e2b0; font-size: clamp(16px, 2.7dvh, 23px); line-height: 1.55; letter-spacing: .04em; }
+.spy-mission .spy-rule { width: 88%; margin: 2px 0; }
+.spy-note { margin: 0; color: var(--ink); font-size: clamp(14px, 2.2dvh, 18px); letter-spacing: .12em; opacity: .92; }
+@media (max-aspect-ratio: 4/5) {
+  .codebox.wide { width: min(470px, 92vw); min-height: 0; }
+}
+
+/* ── 全螢幕遮罩 ── */
+.fs-gate {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px;
+  background: radial-gradient(ellipse 70% 60% at 50% 42%, #133b41, #0a2328 70%, #061619);
+}
+.gate-box { display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center; max-width: 560px; }
+.gate-title { margin: 0; font-family: var(--serif); font-weight: 900; color: #f6e2b0; font-size: clamp(24px, 4.4dvh, 36px); letter-spacing: .08em; }
+.gate-note { margin: -8px 0 0; color: var(--muted); font-size: 17px; line-height: 1.7; }
+.gate-btn { font-size: clamp(20px, 3.2dvh, 26px); padding: .85em 2.6em; }
+.gate-plain { font-size: 17px; padding: .7em 1.6em; }

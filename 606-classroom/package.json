@@ -10,7 +10,8 @@
   "scripts": {
     "serve": "node tools/serve.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
-    "test:e2e": "node tests/e2e/classroom.e2e.mjs"
+    "test:e2e": "node tests/e2e/classroom.e2e.mjs",
+    "test:e2e:spy": "node tests/e2e/spy-fullscreen.e2e.mjs"
   },
   "devDependencies": {
     "pg": "8.16.3"
