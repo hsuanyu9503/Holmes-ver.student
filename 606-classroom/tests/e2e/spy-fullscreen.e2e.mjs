@@ -182,9 +182,11 @@ try {
   assert.match(await deny.textContent('.fs-gate'), /瀏覽器沒有開啟全螢幕/);
   assert.equal(await deny.locator('#fsBtn').textContent(), '再試一次');
   await shot(deny, '08-denied');
+  assert.equal(await deny.evaluate(() => document.querySelector('#app').inert), true, '遮罩時背景 inert');
   await deny.click('#fsPlain');
   await deny.waitForSelector('.fs-gate', { state: 'detached' });
   await deny.waitForSelector('.wait h1');
+  assert.equal(await deny.evaluate(() => document.querySelector('#app').inert), false, '以一般畫面繼續後解除 inert');
 
   const noCtx = await browser.newContext({ viewport: { width: 1180, height: 820 } });
   await noCtx.addInitScript(() => {
@@ -215,6 +217,48 @@ try {
   }
   assert.equal(await none.locator('.fs-gate').count(), 0, '重新選擇一般畫面後不再擋住');
   log('全螢幕被拒／不支援：以一般畫面繼續，可報到與翻牌 ✓');
+
+  // ── 鍵盤限制：尚未翻牌就退出全螢幕 → Tab／Shift+Tab 無法移到背景卡片，翻牌數不變 ──
+  const progress = async () => (await rpc('c606_view', { p_code: code, p_as: 'teacher', p_cred: teacherKey })).progress.playersFlipped;
+  await spyPage.waitForSelector('.flipcard:not(.flipped)');
+  assert.ok(await spyPage.evaluate(() => !!document.fullscreenElement), '起點：全螢幕中');
+  const before = await progress();
+  await spyPage.evaluate(() => document.exitFullscreen());
+  await spyPage.waitForSelector('.fs-gate #fsBtn');
+  assert.equal(await spyPage.evaluate(() => document.querySelector('#app').inert), true, '遮罩時 #app 為 inert');
+  const focusInBackground = () => spyPage.evaluate(() => {
+    const a = document.activeElement;
+    return !!(a && document.querySelector('#app').contains(a));
+  });
+  const focusSeen = new Set();
+  for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+    await spyPage.keyboard.press(key);
+    assert.equal(await focusInBackground(), false, `${key} 後焦點不在背景`);
+    focusSeen.add(await spyPage.evaluate(() => document.activeElement?.id || document.activeElement?.tagName));
+    // 若焦點在背景，Enter／Space 會翻牌；這裡確認即使按下也不會
+    if (!(await spyPage.evaluate(() => document.activeElement?.id === 'fsBtn'))) {
+      await spyPage.keyboard.press('Enter');
+      await spyPage.keyboard.press('Space');
+    }
+  }
+  // 背景卡片也無法以滑鼠點擊（被遮罩覆蓋且 inert）
+  await spyPage.locator('.flipcard').click({ force: true, timeout: 2000 }).catch(() => {});
+  await spyPage.waitForTimeout(1500);
+  assert.equal(await spyPage.locator('.flipcard.flipped').count(), 0, '背景卡片未被翻開');
+  assert.equal(await progress(), before, '教師端翻牌人數不變');
+  await shot(spyPage, '09-gate-keyboard');
+  log(`遮罩期間 Tab／Shift+Tab 焦點只在：${[...focusSeen].join('、')}；教師端翻牌數維持 ${before}／6 ✓`);
+
+  await spyPage.focus('#fsBtn');
+  await spyPage.keyboard.press('Enter'); // 用鍵盤按「回到全螢幕」
+  await spyPage.waitForSelector('.fs-gate', { state: 'detached' });
+  assert.equal(await spyPage.evaluate(() => document.querySelector('#app').inert), false, '回到全螢幕後解除 inert');
+  assert.equal(await progress(), before, '回到全螢幕本身不算翻牌');
+  await spyPage.click('.flipcard');
+  await spyPage.waitForSelector('.flipcard.flipped');
+  for (let i = 0; i < 20 && (await progress()) !== before + 1; i++) await spyPage.waitForTimeout(250);
+  assert.equal(await progress(), before + 1, '親自翻牌後教師端才增加一人');
+  log(`回到全螢幕並親自翻牌 → 教師端 ${before + 1}／6 ✓`);
 
   if (errors.length) throw new Error('頁面錯誤：' + errors.join('; '));
   log('全部通過');

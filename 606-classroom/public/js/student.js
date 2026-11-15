@@ -314,6 +314,8 @@ let gateKey = '';
 function updateGate() {
   const joined = !!token && screenKey !== 'login' && screenKey !== '' && !!view;
   const show = joined && !fsSkip && !fs.active();
+  // 遮罩出現時背景遊戲區設為 inert：鍵盤與輔助科技只能操作遮罩按鈕；畫面資料仍持續同步更新
+  setBackgroundInert(show);
   if (!show) {
     if (gate) { gate.remove(); gate = null; gateKey = ''; }
     return;
@@ -344,6 +346,23 @@ function updateGate() {
   document.body.append(gate);
   gate.querySelector('button')?.focus({ preventScroll: true });
 }
+
+function setBackgroundInert(on) {
+  if (app.inert === on && app.hasAttribute('inert') === on) return;
+  app.inert = on; // 支援 inert 的瀏覽器：不可聚焦、不可點擊、對輔助科技隱藏
+  app.toggleAttribute('inert', on);
+  if (on) {
+    app.setAttribute('aria-hidden', 'true'); // 舊瀏覽器沒有 inert 時，至少對輔助科技隱藏
+    if (app.contains(document.activeElement)) document.activeElement.blur();
+  } else {
+    app.removeAttribute('aria-hidden');
+  }
+}
+
+// 備援（不支援 inert 的舊瀏覽器）：遮罩期間焦點一旦落到背景，立即拉回遮罩按鈕
+document.addEventListener('focusin', (e) => {
+  if (gate && app.contains(e.target)) gate.querySelector('button')?.focus({ preventScroll: true });
+});
 
 for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
   document.addEventListener(ev, () => {
