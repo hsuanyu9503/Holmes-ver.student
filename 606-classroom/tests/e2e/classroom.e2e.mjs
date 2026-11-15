@@ -106,6 +106,9 @@ try {
 
   // 重整不重複計入
   await tablets[0].page.reload();
+  // 重整會離開全螢幕 → 遮罩，點「回到全螢幕」
+  await tablets[0].page.click('#fsBtn');
+  await tablets[0].page.waitForSelector('.fs-gate', { state: 'detached' });
   await tablets[0].page.waitForSelector('.wait h1');
 
   // ── 其餘 20 人以 API 報到（共 23 人） ──
@@ -210,8 +213,8 @@ try {
     for (const t of tabletPlayers) {
       const role = roleOfName(t.name);
       if (role === 'spy') {
-        await t.page.waitForSelector('.codebox .mission');
-        assert.ok((await t.page.textContent('.codebox')).includes('觀察其他玩家的發言，推理本輪的機密情報。'));
+        await t.page.waitForSelector('.codebox .spy-mission');
+        assert.ok((await t.page.textContent('.codebox')).includes('請保持自然，假裝正在確認情報'));
         assert.ok(!(await t.page.content()).includes(`>${r.secretCode}<`));
         if (shotPrefix) await shot(t.page, `${shotPrefix}-student-spy`);
       } else {
